@@ -2,8 +2,12 @@ package main
 
 import (
 	"Tamelien/blog-aggregator/internal/config"
+	"Tamelien/blog-aggregator/internal/database"
+	"database/sql"
 	"log"
 	"os"
+
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -13,8 +17,17 @@ func main() {
 	}
 	State := state{cfg: &cfg}
 
+	db, err := sql.Open("postgres", State.cfg.DBURL)
+	if err != nil {
+		log.Fatalf("failed to open database %s: %v", State.cfg.DBURL, err)
+	}
+	dbQueries := database.New(db)
+	State.db = dbQueries
+
 	cmds := commands{handlerFunctions: make(map[string]func(*state, command) error)}
 	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
+
 	args := os.Args
 	if len(args) < 2 {
 		log.Fatal("Usage: blog-aggregator <command> [args...]")
