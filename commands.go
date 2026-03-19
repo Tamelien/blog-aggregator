@@ -37,7 +37,7 @@ func (c *commands) register(name string, f func(*state, command) error) {
 
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.args) == 0 {
-		return fmt.Errorf("Error no username")
+		return fmt.Errorf("error no username")
 	}
 
 	if err := s.cfg.SetUser(cmd.args[0]); err != nil {
