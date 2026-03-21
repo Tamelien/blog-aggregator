@@ -42,7 +42,7 @@ func (c *commands) register(name string, f func(*state, command) error) {
 }
 
 func handlerLogin(s *state, cmd command) error {
-	if len(cmd.args) == 0 {
+	if len(cmd.args) != 1 {
 		return fmt.Errorf("usage: register <username>")
 	}
 
@@ -61,7 +61,7 @@ func handlerLogin(s *state, cmd command) error {
 }
 
 func handlerRegister(s *state, cmd command) error {
-	if len(cmd.args) == 0 {
+	if len(cmd.args) != 1 {
 		return fmt.Errorf("usage: register <username>")
 	}
 
@@ -113,5 +113,34 @@ func handlerAgg(s *state, cmd command) error {
 	}
 
 	fmt.Printf("Feed: %+v\n", feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+
+	if len(cmd.args) != 2 {
+		return fmt.Errorf("usage: addfeed <name> <url>")
+	}
+
+	user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+	if err != nil {
+		return err
+	}
+
+	feed, err := s.db.AddFeed(context.Background(),
+		database.AddFeedParams{
+			ID:        uuid.New(),
+			Name:      cmd.args[0],
+			Url:       cmd.args[1],
+			UserID:    user.ID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Feed %+v has been created.\n", feed)
+
 	return nil
 }
