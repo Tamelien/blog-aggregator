@@ -4,7 +4,11 @@ import (
 	"Tamelien/blog-aggregator/internal/config"
 	"Tamelien/blog-aggregator/internal/database"
 	"context"
+	"database/sql"
 	"fmt"
+	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -107,12 +111,109 @@ func handlerGetUsers(s *state, cmd command) error {
 }
 
 func handlerAgg(s *state, cmd command) error {
-	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("usage: agg <interval>")
+	}
+
+	interval, err := time.ParseDuration(cmd.args[0])
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Feed: %+v\n", feed)
+	fmt.Printf("Collecting feeds every %s\n", interval)
+
+	ticker := time.NewTicker(interval)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
+}
+
+func scrapeFeeds(s *state) error {
+	feed, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		log.Println("Error fetching next feed:", err)
+		return err
+	}
+
+	fmt.Printf("Fetching feed: %s\n", feed.Url)
+
+	rssFeed, err := fetchFeed(context.Background(), feed.Url)
+	if err != nil {
+		log.Println("Error fetching feed:", err)
+		return err
+	}
+
+	for _, item := range rssFeed.Channel.Item {
+		fmt.Printf("  - %s\n", item.Title)
+		// RSS PubDate sieht so aus: "Mon, 02 Jan 2006 15:04:05 GMT"
+		t, err := time.Parse("Mon, 02 Jan 2006 15:04:05 -0700", item.PubDate)
+		published := sql.NullTime{Time: t, Valid: true}
+		if err != nil {
+			published = sql.NullTime{Time: t, Valid: false}
+		}
+		_, err = s.db.AddPost(context.Background(), database.AddPostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			PublishedAt: published,
+			Title:       sql.NullString{String: item.Title, Valid: true},
+			Url:         item.Link,
+			Description: sql.NullString{String: item.Description, Valid: true},
+			FeedID:      feed.ID,
+		})
+
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate key") {
+				continue
+			}
+			log.Printf("error saving post %s: %v\n", item.Link, err)
+		}
+
+	}
+
+	_, err = s.db.MarkFeedFetched(context.Background(), feed.ID)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	limit := 2
+
+	if len(cmd.args) == 1 {
+		n, err := strconv.Atoi(cmd.args[0])
+		if err != nil {
+			return fmt.Errorf("limit must be a number")
+		}
+		limit = n
+	} else if len(cmd.args) > 1 {
+		return fmt.Errorf("usage: browse <limit>")
+	}
+
+	posts, err := s.db.GetPosts(context.Background(),
+		database.GetPostsParams{UserID: user.ID, Limit: int32(limit)})
+	if err != nil {
+		return err
+	}
+
+	for _, post := range posts {
+		if post.Title.Valid {
+			fmt.Printf("* %s\n", post.Title.String)
+		} else {
+			fmt.Println("* <untitled>")
+		}
+		fmt.Printf("  URL:  %s\n", post.Url)
+		if post.Description.Valid {
+			fmt.Printf("  %s\n", post.Description.String)
+		}
+		if post.PublishedAt.Valid {
+			fmt.Printf("  Published: %s\n", post.PublishedAt.Time.Format("02 Jan 2006"))
+		}
+		fmt.Println()
+	}
+
 	return nil
 }
 
